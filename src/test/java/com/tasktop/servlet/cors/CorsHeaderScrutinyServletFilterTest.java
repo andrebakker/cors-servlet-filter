@@ -1,17 +1,12 @@
 package com.tasktop.servlet.cors;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Matchers.any;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.*;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.regex.Pattern;
+import java.util.*;
+import java.util.stream.Collectors;
 
 import javax.servlet.FilterChain;
 import javax.servlet.FilterConfig;
@@ -48,9 +43,15 @@ public class CorsHeaderScrutinyServletFilterTest {
 
 	private final FilterConfig config = mock(FilterConfig.class);
 
+	private final List<String> parameters = Arrays.asList("/endpoint", "/b", "/c", "/d");
+
+	private final List<String> delimiter = Arrays.asList("\n", ",", " ");
 
 	@Before
 	public void before() {
+		reset(config);
+		reset(request);
+		mockRequest("/api");
 		doReturn(Collections.emptyEnumeration()).when(request).getHeaders(any());
 		doReturn("http://nowhere.com/endpoint").when(request).getRequestURI();
 		doReturn("endpoint").when(request).getContextPath();
@@ -61,14 +62,53 @@ public class CorsHeaderScrutinyServletFilterTest {
 		filter.init(config);
 	}
 
+    @Test
+    public void initWithNoInitParameter() throws ServletException {
+        mockInitParamPathExclusionPattern(null);
+        assertThat(filter.getPathExclusionPatterns()).isEmpty();
+    }
+
+    @Test
+    public void initWithEmptyInitParameter() throws ServletException {
+        mockInitParamPathExclusionPattern("");
+        assertThat(filter.getPathExclusionPatterns()).isEmpty();
+    }
+
+    @Test
+    public void initWithInvalidInitParameter() throws ServletException {
+		mockInitParamPathExclusionPattern("/@(*&#, ;^$@/#^ $%@*&#^");
+		assertThat(filter.getPathExclusionPatterns()).isEmpty();
+    }
+
 	@Test
+	public void initWithEachSeparatorValueInitParameter() throws ServletException {
+        delimiter.forEach(s -> {
+            mockInitParamPathExclusionPattern(joinParametersWith(s));
+            assertThat(filter.getPathExclusionPatterns()).isEqualTo(parameters);
+        });
+	}
+
+	@Test
+	public void initWithAllDelimitersInitParameter() throws ServletException {
+		mockInitParamPathExclusionPattern(interleaveJoin(parameters, delimiter));
+		assertThat(filter.getPathExclusionPatterns()).isEqualTo(parameters);
+	}
+
+    @Test
 	public void destroy() {
 		filter.destroy();
 	}
 
 	@Test
-	public void doFilterAcceptsRequestWithoutOriginOrReferer() throws IOException, ServletException {
+	public void doFilterAcceptsRequestWithoutOriginOrRefererWithMatchingExclusionPath() throws IOException, ServletException {
+		mockRequestWithMatchingExclusionPath();
 		verifyDoFilterAcceptsRequest();
+	}
+
+	@Test
+	public void doFilterRejectsRequestWithoutOriginOrRefererWithMismatchingExclusionPath() throws IOException, ServletException {
+		mockRequestWithMismatchingExclusionPath();
+		verifyDoFilterRejectsRequest();
 	}
 
 	@Test
@@ -170,8 +210,7 @@ public class CorsHeaderScrutinyServletFilterTest {
 	}
 
 	@Test
-	public void doFilterRejectsRequestWithMultipleRefererHeadersWithMatchingHost()
-			throws IOException, ServletException {
+	public void doFilterRejectsRequestWithMultipleRefererHeadersWithMatchingHost() throws IOException, ServletException {
 		mockHeader(HTTP_HEADER_REFERER, "http://a-host", "http://a-host");
 		mockHeader(HTTP_HEADER_HOST, "a-host");
 		verifyDoFilterRejectsRequest();
@@ -192,6 +231,20 @@ public class CorsHeaderScrutinyServletFilterTest {
 		verifyDoFilterAcceptsRequest();
 	}
 
+	@Test
+	public void doFilterAcceptsRequestWithMatchingExclusionPath() throws IOException, ServletException {
+		mockRequestWithMatchingExclusionPath();
+		mockHeader(HTTP_HEADER_ORIGIN, "");
+		verifyDoFilterAcceptsRequest();
+	}
+
+	@Test
+	public void doFilterRejectssRequestWithExcludedPathNotMatchingRequest() throws IOException, ServletException {
+		mockRequestWithMismatchingExclusionPath();
+		mockHeader(HTTP_HEADER_ORIGIN, "");
+		verifyDoFilterRejectsRequest();
+	}
+
 	private void verifyDoFilterAcceptsRequest() throws IOException, ServletException {
 		filter.doFilter(request, response, chain);
 		verify(chain).doFilter(request, response);
@@ -200,10 +253,6 @@ public class CorsHeaderScrutinyServletFilterTest {
 
 	private void verifyDoFilterRejectsRequest() throws IOException, ServletException {
 		filter.doFilter(request, response, chain);
-		expectForbidden();
-	}
-
-	private void expectForbidden() throws IOException {
 		verify(response).sendError(HttpServletResponse.SC_FORBIDDEN, "Forbidden");
 		verifyNoMoreInteractions(chain);
 	}
@@ -211,4 +260,48 @@ public class CorsHeaderScrutinyServletFilterTest {
 	private void mockHeader(String headerName, String... values) {
 		doAnswer(i -> Collections.enumeration(Arrays.asList(values))).when(request).getHeaders(headerName);
 	}
+
+	private void mockRequestWithMatchingExclusionPath() {
+		mockInitParamPathExclusionPattern("/api");
+		mockRequest("/api");
+	}
+
+	private void mockRequestWithMismatchingExclusionPath() {
+		mockInitParamPathExclusionPattern("/api");
+		mockRequest("/apo");
+	}
+
+	private void mockRequest(String endpoint) {
+		doReturn("").when(request).getContextPath();
+		doReturn("" + endpoint).when(request).getRequestURI();
+	}
+
+	private void mockInitParamPathExclusionPattern(String param){
+		doReturn(param).when(config).getInitParameter(CorsHeaderScrutinyServletFilter.PATH_EXCLUSION_PATTERN_PARAM);
+        try {
+            filter.init(config);
+        } catch (ServletException e) {
+            e.printStackTrace();
+        }
+    }
+
+
+	private String joinParametersWith(String join) {
+		return parameters.stream().collect(Collectors.joining(join));
+	}
+
+	private String interleaveJoin(List<String> parameters, List<String> separators) {
+		Iterator<String> iteratorParameter = parameters.iterator();
+		Iterator<String> iteratorSeparator = separators.iterator();
+		StringBuilder builder = new StringBuilder();
+
+		while (iteratorSeparator.hasNext() && iteratorParameter.hasNext()) {
+			builder.append(iteratorParameter.next());
+			builder.append(iteratorSeparator.next());
+		}
+		iteratorParameter.forEachRemaining(builder::append);
+		iteratorSeparator.forEachRemaining(builder::append);
+		return builder.toString();
+	}
+
 }

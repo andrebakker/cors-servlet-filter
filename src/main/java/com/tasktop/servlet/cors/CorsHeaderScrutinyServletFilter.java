@@ -16,13 +16,22 @@
 package com.tasktop.servlet.cors;
 
 import java.io.IOException;
+import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import java.net.URLDecoder;
+import java.util.*;
 
+import java.util.function.Function;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import javax.servlet.Filter;
 import javax.servlet.FilterChain;
 import javax.servlet.FilterConfig;
@@ -39,45 +48,60 @@ public class CorsHeaderScrutinyServletFilter implements Filter {
 	private static final String HEADER_X_FORWARDED_HOST = "X-Forwarded-Host";
 	private static final String HEADER_ORIGIN = "Origin";
 	private static final String HEADER_REFERER = "Referer";
-	private static final String SKIP_PATTERN_PARAM = "cors.config.skipPattern";
-	private Pattern skipPattern;
+	static final String PATH_EXCLUSION_PATTERN_PARAM = "path-exclusion-validURIPattern";
+
+	private static final String REGEX_PATTERN = "[\n, ]";
+	private List<String> pathExclusionPatterns = Collections.emptyList();
+	private static final Pattern validURIPattern = Pattern.compile("^/[0-9a-zA-Z]+");
+	private static final Logger logger = LoggerFactory.getLogger(CorsHeaderScrutinyServletFilter.class);
+
 
 	@Override
 	public void init(FilterConfig filterConfig) throws ServletException {
-		String skipPatternDefinition = filterConfig.getInitParameter(SKIP_PATTERN_PARAM);
-
-		if (skipPatternDefinition != null) {
-			skipPattern = Pattern.compile(skipPatternDefinition, Pattern.DOTALL);
-		}
-
+		Optional<String> initParameter = Optional.ofNullable(filterConfig.getInitParameter(PATH_EXCLUSION_PATTERN_PARAM));
+		pathExclusionPatterns = initParameter
+				.map(parseInitParamToExclusionPatterns())
+				.orElse(Collections.emptyList());
 	}
 
+	List<String> getPathExclusionPatterns() {
+		return pathExclusionPatterns;
+	}
+
+	private Function<String, List<String>> parseInitParamToExclusionPatterns() {
+		return p -> Arrays.stream(p.trim().split(REGEX_PATTERN))
+				.map(String::trim)
+				.filter(s -> validURIPattern.matcher(s).find()) // throw an error for bad patterns?
+				.collect(Collectors.toList());
+	}
+	
 	@Override
 	public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
 			throws IOException, ServletException {
-
-		if (shouldSkip((HttpServletRequest)request)) {
-			chain.doFilter(request, response);
-			return;
-		}
-
-
-		try {
-			checkRequestHeaders((HttpServletRequest) request);
-		} catch (ForbiddenException e) {
-			((HttpServletResponse) response).sendError(HttpServletResponse.SC_FORBIDDEN, e.getMessage());
-			return;
+		HttpServletRequest httpRequest = (HttpServletRequest)request;
+		if (!requestPathIsExcluded(httpRequest)) {
+			try {
+				checkRequestHeaders(httpRequest);
+			} catch (ForbiddenException e) {
+				((HttpServletResponse) response).sendError(HttpServletResponse.SC_FORBIDDEN, e.getMessage());
+				return;
+			}
 		}
 		chain.doFilter(request, response);
 	}
 
-	private boolean shouldSkip(HttpServletRequest request) {
-		if (skipPattern == null) {
-			return false;
+	private boolean requestPathIsExcluded(HttpServletRequest request) {
+		String requestPath = request.getRequestURI().substring(request.getContextPath().length());
+
+		try {
+			URLDecoder.decode(requestPath, "UTF-8");
+		} catch (UnsupportedEncodingException e) {
+			logger.warn("Unable to decode request endpoint {}", requestPath);
+			return true;
 		}
 
-		String requestPath = request.getRequestURI().substring(request.getContextPath().length());
-		return skipPattern.matcher(requestPath).matches();
+		return pathExclusionPatterns.stream()
+				.anyMatch(requestPath::startsWith);
 	}
 
 	private void checkRequestHeaders(HttpServletRequest request) {
