@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 import javax.servlet.Filter;
 import javax.servlet.FilterChain;
@@ -38,15 +39,29 @@ public class CorsHeaderScrutinyServletFilter implements Filter {
 	private static final String HEADER_X_FORWARDED_HOST = "X-Forwarded-Host";
 	private static final String HEADER_ORIGIN = "Origin";
 	private static final String HEADER_REFERER = "Referer";
+	private static final String SKIP_PATTERN_PARAM = "cors.config.skipPattern";
+	private Pattern skipPattern;
 
 	@Override
 	public void init(FilterConfig filterConfig) throws ServletException {
-		// nothing to do
+		String skipPatternDefinition = filterConfig.getInitParameter(SKIP_PATTERN_PARAM);
+
+		if (skipPatternDefinition != null) {
+			skipPattern = Pattern.compile(skipPatternDefinition, Pattern.DOTALL);
+		}
+
 	}
 
 	@Override
 	public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
 			throws IOException, ServletException {
+
+		if (shouldSkip((HttpServletRequest)request)) {
+			chain.doFilter(request, response);
+			return;
+		}
+
+
 		try {
 			checkRequestHeaders((HttpServletRequest) request);
 		} catch (ForbiddenException e) {
@@ -54,6 +69,15 @@ public class CorsHeaderScrutinyServletFilter implements Filter {
 			return;
 		}
 		chain.doFilter(request, response);
+	}
+
+	private boolean shouldSkip(HttpServletRequest request) {
+		if (skipPattern == null) {
+			return false;
+		}
+
+		String requestPath = request.getRequestURI().substring(request.getContextPath().length());
+		return skipPattern.matcher(requestPath).matches();
 	}
 
 	private void checkRequestHeaders(HttpServletRequest request) {
