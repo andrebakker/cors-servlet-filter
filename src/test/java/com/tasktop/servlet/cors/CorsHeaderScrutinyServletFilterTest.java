@@ -2,11 +2,18 @@ package com.tasktop.servlet.cors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Matchers.any;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 
 import java.io.IOException;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 
 import javax.servlet.FilterChain;
 import javax.servlet.FilterConfig;
@@ -18,7 +25,6 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
-import org.junit.runners.Parameterized;
 
 public class CorsHeaderScrutinyServletFilterTest {
 
@@ -43,72 +49,57 @@ public class CorsHeaderScrutinyServletFilterTest {
 
 	private final FilterConfig config = mock(FilterConfig.class);
 
-	private final List<String> parameters = Arrays.asList("/endpoint", "/b", "/c", "/d");
-
-	private final List<String> delimiter = Arrays.asList("\n", ",", " ");
 
 	@Before
 	public void before() {
-		reset(config);
-		reset(request);
-		mockRequest("/api");
 		doReturn(Collections.emptyEnumeration()).when(request).getHeaders(any());
-		doReturn("http://nowhere.com/endpoint").when(request).getRequestURI();
-		doReturn("endpoint").when(request).getContextPath();
 	}
 
 	@Test
-	public void init() throws ServletException {
+	public void initWithNoHeaderCheckExclusionParam() throws ServletException {
 		filter.init(config);
 	}
-
-    @Test
-    public void initWithNoInitParameter() throws ServletException {
-        mockInitParamPathExclusionPattern(null);
-        assertThat(filter.getPathExclusionPatterns()).isEmpty();
-    }
-
-    @Test
-    public void initWithEmptyInitParameter() throws ServletException {
-        mockInitParamPathExclusionPattern("");
-        assertThat(filter.getPathExclusionPatterns()).isEmpty();
-    }
-
-    @Test
-    public void initWithInvalidInitParameter() throws ServletException {
-		mockInitParamPathExclusionPattern("/@(*&#, ;^$@/#^ $%@*&#^");
-		assertThat(filter.getPathExclusionPatterns()).isEmpty();
-    }
-
+	
 	@Test
-	public void initWithEachSeparatorValueInitParameter() throws ServletException {
-        delimiter.forEach(s -> {
-            mockInitParamPathExclusionPattern(joinParametersWith(s));
-            assertThat(filter.getPathExclusionPatterns()).isEqualTo(parameters);
-        });
+	public void initWithEmptyHeaderCheckExclusionPath() throws ServletException {
+		filter.init(configWithExlusionPathAs(""));
+		
+		assertThat(getExcludePathsChecked()).isEmpty();
+	}
+	
+	@Test 
+	public void initWithSingleHeaderCheckExclusionPath() throws ServletException {
+		filter.init(configWithExlusionPathAs("/some/path"));
+		assertThat(getExcludePathsChecked()).containsExactly("/some/path");
 	}
 
 	@Test
-	public void initWithAllDelimitersInitParameter() throws ServletException {
-		mockInitParamPathExclusionPattern(interleaveJoin(parameters, delimiter));
-		assertThat(filter.getPathExclusionPatterns()).isEqualTo(parameters);
+	public void initWithCommaSeparatedHeaderCheckExclusionPath() throws ServletException {
+		filter.init(configWithExlusionPathAs("/some/path,/other/different/path"));
+		assertThat(getExcludePathsChecked()).containsExactlyInAnyOrder("/some/path", "/other/different/path");
+	}
+	
+	@Test
+	public void initWithWhitespaceSeparatedHeaderCheckExclusionPath() throws ServletException {
+		filter.init(configWithExlusionPathAs("/some/path /other/different/path"));
+		assertThat(getExcludePathsChecked()).containsExactlyInAnyOrder("/some/path", "/other/different/path");
+	}
+	
+	@Test
+	public void initWithMultipleMixedDelimitersSeparatedHeaderCheckExclusionPath() throws ServletException {
+		filter.init(configWithExlusionPathAs("/first/path, /second/path\t/third/path\n\n/fourth/path   \t "));
+		assertThat(getExcludePathsChecked())
+			.containsExactlyInAnyOrder("/first/path", "/second/path", "/third/path", "/fourth/path");
 	}
 
-    @Test
+	@Test
 	public void destroy() {
 		filter.destroy();
 	}
 
 	@Test
-	public void doFilterAcceptsRequestWithoutOriginOrRefererWithMatchingExclusionPath() throws IOException, ServletException {
-		mockRequestWithMatchingExclusionPath();
+	public void doFilterAcceptsRequestWithoutOriginOrReferer() throws IOException, ServletException {
 		verifyDoFilterAcceptsRequest();
-	}
-
-	@Test
-	public void doFilterRejectsRequestWithoutOriginOrRefererWithMismatchingExclusionPath() throws IOException, ServletException {
-		mockRequestWithMismatchingExclusionPath();
-		verifyDoFilterRejectsRequest();
 	}
 
 	@Test
@@ -210,7 +201,8 @@ public class CorsHeaderScrutinyServletFilterTest {
 	}
 
 	@Test
-	public void doFilterRejectsRequestWithMultipleRefererHeadersWithMatchingHost() throws IOException, ServletException {
+	public void doFilterRejectsRequestWithMultipleRefererHeadersWithMatchingHost()
+			throws IOException, ServletException {
 		mockHeader(HTTP_HEADER_REFERER, "http://a-host", "http://a-host");
 		mockHeader(HTTP_HEADER_HOST, "a-host");
 		verifyDoFilterRejectsRequest();
@@ -230,19 +222,95 @@ public class CorsHeaderScrutinyServletFilterTest {
 		mockHeader(HTTP_HEADER_HOST, "a-host");
 		verifyDoFilterAcceptsRequest();
 	}
-
+	
 	@Test
-	public void doFilterAcceptsRequestWithMatchingExclusionPath() throws IOException, ServletException {
-		mockRequestWithMatchingExclusionPath();
-		mockHeader(HTTP_HEADER_ORIGIN, "");
+	public void doFilterSkipsHeaderCheckWhenRequestWithinExclusionPattern() throws IOException, ServletException {
+		mockRequest("endpoint", "somewhere");
+		filter.init(configWithExlusionPathAs("/somewhere"));
 		verifyDoFilterAcceptsRequest();
+		verifyHeaderCheckSkipped();
 	}
-
+	
 	@Test
-	public void doFilterRejectssRequestWithExcludedPathNotMatchingRequest() throws IOException, ServletException {
-		mockRequestWithMismatchingExclusionPath();
-		mockHeader(HTTP_HEADER_ORIGIN, "");
-		verifyDoFilterRejectsRequest();
+	public void doFilterChecksHeaderWhenRequestNotInExclusionPattern() throws IOException, ServletException {
+		mockRequest("endpoint", "somewhere");
+		filter.init(configWithExlusionPathAs("/other"));
+		verifyDoFilterAcceptsRequest();
+		verify(request, atLeastOnce()).getHeaders(any());
+	}
+	
+	@Test
+	public void doFilterChecksHeaderWhenRequestContainsExclusionPattern() throws IOException, ServletException {
+		mockRequest("endpoint", "somewhere");
+		filter.init(configWithExlusionPathAs("/some"));
+		verifyDoFilterAcceptsRequest();
+		verify(request, atLeastOnce()).getHeaders(any());
+	}
+	
+	@Test
+	public void doFilterChecksHeaderWhenRequestContainedOnStartOfExclusionPattern() throws IOException, ServletException {
+		mockRequest("endpoint", "somewhere");
+		filter.init(configWithExlusionPathAs("/somewhereelse"));
+		verifyDoFilterAcceptsRequest();
+		verify(request, atLeastOnce()).getHeaders(any());
+	}
+	
+	@Test
+	public void doFilterChecksHeaderWhenRequestContainedOnEndOfExclusionPattern() throws IOException, ServletException {
+		mockRequest("endpoint", "somewhere");
+		filter.init(configWithExlusionPathAs("/elsesomewhere"));
+		verifyDoFilterAcceptsRequest();
+		verify(request, atLeastOnce()).getHeaders(any());
+	}
+	
+	@Test
+	public void doFilterChecksHeaderWhenRequestDoesNotStartWithExclusionPattern() throws IOException, ServletException {
+		mockRequest("endpoint", "somewhere");
+		filter.init(configWithExlusionPathAs("/else/somewhere"));
+		verifyDoFilterAcceptsRequest();
+		verify(request, atLeastOnce()).getHeaders(any());
+	}
+	
+	@Test
+	public void doFilterChecksHeaderWhenExclusionPatternMoreSpecificThanRequest() throws IOException, ServletException {
+		mockRequest("endpoint", "somewhere");
+		filter.init(configWithExlusionPathAs("/somewhere/else"));
+		verifyDoFilterAcceptsRequest();
+		verify(request, atLeastOnce()).getHeaders(any());
+	}
+	
+	@Test
+	public void doFilterSkipsHeaderCheckWhenRequestMoreSpecificExclusionPattern() throws IOException, ServletException {
+		mockRequest("endpoint", "somewhere/else/specifically");
+		filter.init(configWithExlusionPathAs("/somewhere/else"));
+		verifyDoFilterAcceptsRequest();
+		verify(request, never()).getHeaders(any());
+	}
+	
+	@Test
+	public void doFilterSkipsHeaderCheckWhenPercentEncodedRequestMatchesExclusionPattern() throws IOException, ServletException {
+		mockRequest("endpoint", "somewhere/%C3%A9");
+		filter.init(configWithExlusionPathAs("/somewhere/é"));
+		verifyDoFilterAcceptsRequest();
+		verify(request, never()).getHeaders(any());
+	}
+	
+	@Test
+	public void doFilterChecksHeaderWhenPercentEncodedRequestDoesNotMatchExclusionPattern() throws IOException, ServletException {
+		mockRequest("endpoint", "somewhere/%C3%A9");
+		filter.init(configWithExlusionPathAs("/somewhere/élse"));
+		verifyDoFilterAcceptsRequest();
+		verify(request, atLeastOnce()).getHeaders(any());
+	}
+	
+	private FilterConfig configWithExlusionPathAs(String path) {
+		doReturn(path).when(config).getInitParameter(CorsHeaderScrutinyServletFilter.EXCLUDE_HEADER_CHECK_PARAM);
+		return config;
+	}
+	
+	private List<String> getExcludePathsChecked() {
+		assertThat(filter.getRequestExclusionMatcher()).isNotEmpty();
+		return filter.getRequestExclusionMatcher().get().getExcludePaths();
 	}
 
 	private void verifyDoFilterAcceptsRequest() throws IOException, ServletException {
@@ -253,6 +321,16 @@ public class CorsHeaderScrutinyServletFilterTest {
 
 	private void verifyDoFilterRejectsRequest() throws IOException, ServletException {
 		filter.doFilter(request, response, chain);
+		expectForbidden();
+	}
+	
+	private void verifyHeaderCheckSkipped() {
+		verify(request, never()).getHeader(any());
+		verify(request, never()).getHeaderNames();
+		verify(request, never()).getHeaders(any());
+	}
+
+	private void expectForbidden() throws IOException {
 		verify(response).sendError(HttpServletResponse.SC_FORBIDDEN, "Forbidden");
 		verifyNoMoreInteractions(chain);
 	}
@@ -260,48 +338,9 @@ public class CorsHeaderScrutinyServletFilterTest {
 	private void mockHeader(String headerName, String... values) {
 		doAnswer(i -> Collections.enumeration(Arrays.asList(values))).when(request).getHeaders(headerName);
 	}
-
-	private void mockRequestWithMatchingExclusionPath() {
-		mockInitParamPathExclusionPattern("/api");
-		mockRequest("/api");
+	
+	private void mockRequest(String contextPath, String requestURI) {
+		doReturn(contextPath).when(request).getContextPath();
+		doReturn(contextPath + "/" + requestURI).when(request).getRequestURI();
 	}
-
-	private void mockRequestWithMismatchingExclusionPath() {
-		mockInitParamPathExclusionPattern("/api");
-		mockRequest("/apo");
-	}
-
-	private void mockRequest(String endpoint) {
-		doReturn("").when(request).getContextPath();
-		doReturn("" + endpoint).when(request).getRequestURI();
-	}
-
-	private void mockInitParamPathExclusionPattern(String param){
-		doReturn(param).when(config).getInitParameter(CorsHeaderScrutinyServletFilter.PATH_EXCLUSION_PATTERN_PARAM);
-        try {
-            filter.init(config);
-        } catch (ServletException e) {
-            e.printStackTrace();
-        }
-    }
-
-
-	private String joinParametersWith(String join) {
-		return parameters.stream().collect(Collectors.joining(join));
-	}
-
-	private String interleaveJoin(List<String> parameters, List<String> separators) {
-		Iterator<String> iteratorParameter = parameters.iterator();
-		Iterator<String> iteratorSeparator = separators.iterator();
-		StringBuilder builder = new StringBuilder();
-
-		while (iteratorSeparator.hasNext() && iteratorParameter.hasNext()) {
-			builder.append(iteratorParameter.next());
-			builder.append(iteratorSeparator.next());
-		}
-		iteratorParameter.forEachRemaining(builder::append);
-		iteratorSeparator.forEachRemaining(builder::append);
-		return builder.toString();
-	}
-
 }
