@@ -304,7 +304,7 @@ public class CorsHeaderScrutinyServletFilterTest {
 	}
 	
 	private FilterConfig configWithExlusionPathAs(String path) {
-		doReturn(path).when(config).getInitParameter(CorsHeaderScrutinyServletFilter.EXCLUDE_HEADER_CHECK_PARAM);
+		doReturn(path).when(config).getInitParameter(CorsHeaderScrutinyServletFilter.PATH_EXCLUSION_PATTERN);
 		return config;
 	}
 	

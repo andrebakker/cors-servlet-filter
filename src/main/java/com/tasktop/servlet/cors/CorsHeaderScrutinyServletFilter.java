@@ -47,13 +47,13 @@ public class CorsHeaderScrutinyServletFilter implements Filter {
 	private static final String HEADER_ORIGIN = "Origin";
 	private static final String HEADER_REFERER = "Referer";
 	
-	static final String EXCLUDE_HEADER_CHECK_PARAM = "exclude-header-check";
+	static final String PATH_EXCLUSION_PATTERN = "path-exclusion-pattern";
 	
 	Optional<RequestExclusionMatcher> requestExclusionMatcher = Optional.empty();
 
 	@Override
 	public void init(FilterConfig filterConfig) throws ServletException {
-		requestExclusionMatcher = Optional.ofNullable(filterConfig.getInitParameter(EXCLUDE_HEADER_CHECK_PARAM))
+		requestExclusionMatcher = Optional.ofNullable(filterConfig.getInitParameter(PATH_EXCLUSION_PATTERN))
 				.map(RequestExclusionMatcher::new);
 	}
 	
