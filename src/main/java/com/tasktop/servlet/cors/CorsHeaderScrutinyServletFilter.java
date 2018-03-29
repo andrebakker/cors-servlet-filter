@@ -134,11 +134,8 @@ public class CorsHeaderScrutinyServletFilter implements Filter {
 	
 	class RequestExclusionMatcher {
 		private static final String PATTERN_OR = "|";
-		
 		private static final String PATTERN_PREFIX = "^";
-		
 		private static final String PATTERN_SUFFIX = "(/|$)";
-		
 		private static final String PATH_DELIMITER_PATTERN = "[,\\s]";
 		
 		private final Pattern acceptPattern;
