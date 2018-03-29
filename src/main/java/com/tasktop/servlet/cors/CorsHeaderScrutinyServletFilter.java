@@ -15,20 +15,12 @@
  *******************************************************************************/
 package com.tasktop.servlet.cors;
 
-import static java.util.stream.Collectors.joining;
-
 import java.io.IOException;
-import java.io.UnsupportedEncodingException;
 import java.net.URI;
-import java.net.URLDecoder;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Predicate;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import javax.servlet.Filter;
 import javax.servlet.FilterChain;
@@ -47,21 +39,21 @@ public class CorsHeaderScrutinyServletFilter implements Filter {
 	private static final String HEADER_ORIGIN = "Origin";
 	private static final String HEADER_REFERER = "Referer";
 	
-	static final String PATH_EXCLUSION_PATTERN = "path-exclusion-pattern";
+	static final String PATH_EXCLUSION_PATTERN = "path-exclusion-prefix";
 	
-	Optional<RequestExclusionMatcher> requestExclusionMatcher = Optional.empty();
+	Optional<RequestPathMatcher> requestExclusionMatcher = Optional.empty();
 
 	@Override
 	public void init(FilterConfig filterConfig) throws ServletException {
 		requestExclusionMatcher = Optional.ofNullable(filterConfig.getInitParameter(PATH_EXCLUSION_PATTERN))
-				.map(RequestExclusionMatcher::new);
+				.map(RequestPathMatcher::new);
 	}
 	
 	@Override
 	public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
 			throws IOException, ServletException {
 		HttpServletRequest httpRequest = (HttpServletRequest)request;
-		if (requestExclusionMatcher.map(matcher -> !matcher.allowHeaderCheckExclusion(httpRequest)).orElse(true)) {
+		if (!isRequestExcluded(httpRequest)) {
 			try {
 				checkRequestHeaders(httpRequest);
 			} catch (ForbiddenException e) {
@@ -70,6 +62,10 @@ public class CorsHeaderScrutinyServletFilter implements Filter {
 			}
 		}
 		chain.doFilter(request, response);
+	}
+
+	private Boolean isRequestExcluded(HttpServletRequest httpRequest) {
+		return getRequestExclusionMatcher().map(matcher -> matcher.matchesRequest(httpRequest)).orElse(false);
 	}
 
 	private void checkRequestHeaders(HttpServletRequest request) {
@@ -128,51 +124,7 @@ public class CorsHeaderScrutinyServletFilter implements Filter {
 		// nothing to do
 	}
 	
-	Optional<RequestExclusionMatcher> getRequestExclusionMatcher() {
-		return this.requestExclusionMatcher;
-	}
-	
-	class RequestExclusionMatcher {
-		private static final String PATTERN_OR = "|";
-		private static final String PATTERN_PREFIX = "^";
-		private static final String PATTERN_SUFFIX = "(/|$)";
-		private static final String PATH_DELIMITER_PATTERN = "[,\\s]";
-		
-		private final Pattern acceptPattern;
-		
-		private List<String> excludePaths = Collections.emptyList();
-		
-		RequestExclusionMatcher(String excludeHeaderCheckPaths) {
-			this.excludePaths = toPathList(excludeHeaderCheckPaths);
-			
-			String urlExclusionRegex = excludePaths.stream().map(Pattern::quote).collect(joining(PATTERN_OR));
-			this.acceptPattern = Pattern.compile(PATTERN_PREFIX + urlExclusionRegex + PATTERN_SUFFIX);
-		}
-
-		private boolean allowHeaderCheckExclusion(HttpServletRequest request) {
-			try {
-				String requestPath = URLDecoder.decode(getRequestUriWithoutContextPath(request), "UTF-8");
-				return acceptPattern.matcher(requestPath).find();
-			} catch (UnsupportedEncodingException e) {
-				return false;
-			}
-		}
-		
-		private String getRequestUriWithoutContextPath(HttpServletRequest request) {
-			String requestURI = request.getRequestURI(); 
-			return requestURI.substring(requestURI.indexOf(request.getContextPath()) + request.getContextPath().length());
-		}
-		
-		private List<String> toPathList(String value) {
-			return Arrays.asList(value.split(PATH_DELIMITER_PATTERN))
-					.stream()
-					.map(String::trim)
-					.filter(((Predicate<String>) String::isEmpty).negate())
-					.collect(Collectors.toList());
-		}
-		
-		List<String> getExcludePaths() {
-			return this.excludePaths;
-		}
+	Optional<RequestPathMatcher> getRequestExclusionMatcher() {
+		return requestExclusionMatcher;
 	}
 }

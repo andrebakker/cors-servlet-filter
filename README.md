@@ -47,17 +47,22 @@ In the web.xml of your Java web application:
 
 This filter should be added at the top of the web.xml so that it is invoked before other filters.
 
-You may also whitelist the endpoints to exclude from the CORS filter by adding the param-name **path-exclusion-pattern**
+The servlet filter may be configured to exclude specific paths by specifying the **path-exclusion-prefix** init parameter. Requests to excluded paths are passed through the filter without inspecting headers.
+
 The values are a list of comma or whitespace separated values for prefixing endpoints to exclude.
-e.g. /api/ will exclude /api/some/endpoint/here from the cors filter. It is recommended to have the both beginning and trailing / in your path exclusion pattern.
+e.g. `/api/` will exclude `/api/some/endpoint/here` from the cors filter. It is recommended to have the both beginning and trailing / in your path exclusion pattern.
 
 ````
 	<filter>
 		<filter-name>CORSFilter</filter-name>
 		<filter-class>com.tasktop.servlet.cors.CorsHeaderScrutinyServletFilter</filter-class>
 		<init-param>
-		  <param-name>path-exclusion-pattern</param-name>
-		  <param-value>/api/</param-value>
+			<param-name>path-exclusion-prefix</param-name>
+			<param-value>
+				/api/one/
+				/api/two/
+				/other/api/
+			</param-value>
 		</init-param>
 	</filter>
 	<filter-mapping>
@@ -66,6 +71,7 @@ e.g. /api/ will exclude /api/some/endpoint/here from the cors filter. It is reco
 	</filter-mapping>
 ````
 
+In the example above, paths with the prefix as `/api/one/`, `api/two` and `other/api` would skip the header check.
 
 Building
 ========
