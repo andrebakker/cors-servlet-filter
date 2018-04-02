@@ -226,7 +226,7 @@ public class CorsHeaderScrutinyServletFilterTest {
 	}
 	
 	private FilterConfig configWithExlusionPathAs(String path) {
-		doReturn(path).when(config).getInitParameter(CorsHeaderScrutinyServletFilter.PATH_EXCLUSION_PATTERN);
+		doReturn(path).when(config).getInitParameter(CorsHeaderScrutinyServletFilter.INIT_PARAM_NAME_PATH_EXCLUSION_PREFIX);
 		return config;
 	}
 

@@ -47,10 +47,14 @@ In the web.xml of your Java web application:
 
 This filter should be added at the top of the web.xml so that it is invoked before other filters.
 
+Excluding Paths
+==========
+
 The servlet filter may be configured to exclude specific paths by specifying the **path-exclusion-prefix** init parameter. Requests to excluded paths are passed through the filter without inspecting headers.
 
-The values are a list of comma or whitespace separated values for prefixing endpoints to exclude.
-e.g. `/api/` will exclude `/api/some/endpoint/here` from the cors filter. It is recommended to have the both beginning and trailing / in your path exclusion pattern.
+Values specified via **path-exclusion-prefix** are a list of comma or whitespace separated values for prefixing endpoints to exclude.
+e.g. `/api/` will exclude `/api/some/endpoint/here` from the CORSFilter. If a path specified does not start with `/`, the slash will be added automatically.
+
 
 ````
 	<filter>
@@ -60,8 +64,8 @@ e.g. `/api/` will exclude `/api/some/endpoint/here` from the cors filter. It is 
 			<param-name>path-exclusion-prefix</param-name>
 			<param-value>
 				/api/one/
-				/api/two/
-				/other/api/
+				/api/two
+				other/api
 			</param-value>
 		</init-param>
 	</filter>
@@ -71,7 +75,22 @@ e.g. `/api/` will exclude `/api/some/endpoint/here` from the cors filter. It is 
 	</filter-mapping>
 ````
 
-In the example above, paths with the prefix as `/api/one/`, `api/two` and `other/api` would skip the header check.
+The paths specified in the **path-exclusion-prefix** must not contain the context path, as it is removed when checking the request URI.
+
+For example, with the above configuration and the context path `/path` the following HTTP requests would skip the header check:
+
+* `GET /path/api/one/example-suffix`
+* `GET /path/api/two`
+* `GET /path/api/two/with-suffix`
+* `POST /path/other/api-with-any-suffix`
+
+The following HTTP requests would not skip the header check:
+
+* `GET /path/api/one`
+* `GET /path/some/other/path`
+* `GET /path/`
+* `GET /path/some/other/api`
+* `DELETE /path/api/three`
 
 Building
 ========
